@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+httpx
+beautifulsoup4
+python-dateutil
+python-dotenv
+requests
+playwright==1.46.0
+apscheduler
