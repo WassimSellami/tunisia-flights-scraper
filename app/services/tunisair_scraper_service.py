@@ -101,18 +101,21 @@ class TunisairScraper:
             return self.fallback_eur_rate
 
         url = EXCHANGE_RATE_API_URL.format(api_key=self.exchange_rate_api_key)
-        try:
-            response = self.session.get(url, timeout=10)
-            response.raise_for_status()
-            data = response.json()
-            if data.get('result') == 'success':
-                rate = data['conversion_rates']['EUR']
-                logger.info(f"Successfully fetched exchange rate: 1 TND = {rate:.4f} EUR")
-                return rate
-        except requests.RequestException as e:
-            logger.error(f"Error fetching exchange rate: {e}. Using fallback.")
+        for attempt in range(REQUEST_RETRIES):
+            try:
+                response = self.session.get(url, timeout=10)
+                response.raise_for_status()
+                data = response.json()
+                if data.get('result') == 'success':
+                    rate = data['conversion_rates']['EUR']
+                    logger.info(f"Successfully fetched exchange rate: 1 TND = {rate:.4f} EUR")
+                    return rate
+            except requests.exceptions.RequestException as e:
+                logger.warning(f"Attempt {attempt + 1}/{REQUEST_RETRIES} to fetch exchange rate failed: {e}")
+                if attempt < REQUEST_RETRIES - 1:
+                    time.sleep(1)
 
-        logger.warning(f"Using fallback exchange rate: 1 TND = {self.fallback_eur_rate:.4f} EUR")
+        logger.error(f"Failed to fetch exchange rate after {REQUEST_RETRIES} attempts. Using fallback.")
         return self.fallback_eur_rate
 
     def _extract_prices(self, html: str, is_eur_native: bool, conversion_rate: float) -> List[Dict[str, Any]]:
@@ -213,26 +216,32 @@ class TunisairScraper:
                 "tripDuration": DEFAULT_TRIP_DURATION,
                 "tripType": DEFAULT_TRIP_TYPE
             }
-            try:
-                response = self.session.get(base_url, params=params, timeout=20)
-                response.raise_for_status()
-                data = response.json()
-                html_view = data.get('view', '')
-                logger.info(f"HTML content length: {len(html_view)}")
+            
+            html_view = None
+            for attempt in range(REQUEST_RETRIES):
+                try:
+                    response = self.session.get(base_url, params=params, timeout=20)
+                    response.raise_for_status()
+                    data = response.json()
+                    html_view = data.get('view', '')
+                    logger.info(f"Successfully fetched HTML for {dep_code}->{arr_code} on {search_date}. Length: {len(html_view)}")
+                    break 
+                except requests.RequestException as e:
+                    logger.warning(f"Attempt {attempt + 1}/{REQUEST_RETRIES} failed for {dep_code}->{arr_code} on date {search_date}: {e}")
+                    if attempt < REQUEST_RETRIES - 1:
+                        time.sleep(1)
+            
+            if html_view:
+                extracted_data = self._extract_prices(html_view, is_eur_native, conversion_rate)
+                for flight_data in extracted_data:
+                    flight_data["departureAirportCode"] = dep_code
+                    flight_data["arrivalAirportCode"] = arr_code
+                    flight_data["airlineCode"] = AIRLINE_CODE
+                    route_flights.append(flight_data)
+            else:
+                logger.error(f"Failed to fetch data for {dep_code}->{arr_code} on date {search_date} after {REQUEST_RETRIES} attempts.")
 
-
-                if html_view:
-                    extracted_data = self._extract_prices(html_view, is_eur_native, conversion_rate)
-                    for flight_data in extracted_data:
-                        flight_data["departureAirportCode"] = dep_code
-                        flight_data["arrivalAirportCode"] = arr_code
-                        flight_data["airlineCode"] = AIRLINE_CODE
-                        route_flights.append(flight_data)
-
-                time.sleep(0.5)
-            except requests.RequestException as e:
-                logger.error(f"Request failed for {dep_code}->{arr_code} on date {search_date}: {e}")
-                continue
+            time.sleep(0.5)
 
         logger.info(f"Found {len(route_flights)} prices for route {dep_code} -> {arr_code}")
         return route_flights
