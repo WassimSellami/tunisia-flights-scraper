@@ -47,23 +47,35 @@ class BackendApiClient:
             logger.error(f"FATAL: Failed to fetch airports from backend: {e}")
             return []
 
-    def report_scraped_data(self, scraped_flights: List[Dict[str, Any]]) -> bool:
-        payload = {"flights": scraped_flights}
-        logger.info(f"Reporting {len(scraped_flights)} found flights to the backend...")
+import time
+import requests
+import logging
+
+logger = logging.getLogger(__name__)
+
+def report_scraped_data(self, flight_chunk, max_retries=3, timeout=60):
+    url = f"{self.backend_url}/flights/report-scraped-data"
+    headers = {"Content-Type": "application/json"}
+    data = {"flights": flight_chunk}
+
+    for attempt in range(1, max_retries + 1):
         try:
-            response = self.session.post(
-                f"{self.base_url}/flights/report-scraped-data",
-                json=payload,
-                timeout=60
-            )
-            response.raise_for_status()
-            logger.info("Successfully reported scraped data. Backend accepted the report.")
-            return True
-        except requests.RequestException as e:
-            logger.error(f"Failed to report scraped data to backend: {e}")
-            if e.response is not None:
-                logger.error(f"Backend responded with status {e.response.status_code}: {e.response.text}")
-            return False
+            response = requests.post(url, json=data, headers=headers, timeout=timeout)
+            if response.status_code == 202:
+                logger.info(f"✅ Successfully reported chunk of {len(flight_chunk)} flights.")
+                return True
+            else:
+                logger.warning(f"⚠️ Unexpected status code {response.status_code} on attempt {attempt}.")
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"⚠️ Attempt {attempt} failed with error: {e}")
+
+        # Backoff before retrying
+        sleep_seconds = 2 ** attempt
+        logger.info(f"Retrying in {sleep_seconds} seconds...")
+        time.sleep(sleep_seconds)
+
+    logger.error(f"❌ Failed to report chunk after {max_retries} attempts.")
+    return False
 
 class TunisairScraper:
     def __init__(self, api_client: BackendApiClient, exchange_rate_api_key: str):
@@ -166,7 +178,13 @@ class TunisairScraper:
             all_scraped_flights.extend(self._scrape_route(dep_code, arr_code, is_eur_native=False, conversion_rate=conversion_rate))
 
         if all_scraped_flights:
-            self.api_client.report_scraped_data(all_scraped_flights)
+            chunk_size = 100
+            for i in range(0, len(report_scraped_data), chunk_size):
+                chunk = report_scraped_data[i:i+chunk_size]
+                success = self.report_scraped_data(chunk)
+                if not success:
+                    logger.error(f"❌ Failed to report chunk {i // chunk_size + 1}")
+                time.sleep(1)
         else:
             logger.info("No Tunisair flights found in this scraping run.")
             
