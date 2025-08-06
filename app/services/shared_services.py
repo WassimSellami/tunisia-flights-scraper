@@ -5,7 +5,7 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-POST_CHUNK_SIZE = 100
+POST_CHUNK_SIZE = 150
 REQUEST_RETRIES = 3
 REQUEST_TIMEOUT = 60
 
@@ -20,10 +20,10 @@ class BackendApiClient:
         try:
             response = self.session.get(f"{self.base_url}/airports/", timeout=30)
             response.raise_for_status()
-            logger.info("Successfully fetched airports from backend.")
+            logger.info("Successfully fetched airports.")
             return response.json()
         except requests.RequestException as e:
-            logger.error(f"FATAL: Failed to fetch airports from backend: {e}")
+            logger.error(f"FATAL: Failed to fetch airports: {e}")
             return []
 
     def report_scraped_data(self, scraped_flights: List[Dict[str, Any]]):
