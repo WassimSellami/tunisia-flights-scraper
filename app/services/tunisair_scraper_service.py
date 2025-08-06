@@ -52,42 +52,39 @@ class BackendApiClient:
             logger.error(f"FATAL: Failed to fetch airports from backend: {e}")
             return []
 
-    def report_scraped_data(self, scraped_flights: List[Dict[str, Any]]) -> bool:
-        all_chunks_successful = True
-        for i in range(0, len(scraped_flights), POST_CHUNK_SIZE):
-            chunk = scraped_flights[i:i + POST_CHUNK_SIZE]
-            payload = {"flights": chunk}
-            logger.info(f"Reporting chunk of {len(chunk)} flights to the backend...")
+def report_scraped_data(self, scraped_flights: List[Dict[str, Any]]) -> bool:
+    all_chunks_successful = True
+    for i in range(0, len(scraped_flights), POST_CHUNK_SIZE):
+        chunk = scraped_flights[i:i + POST_CHUNK_SIZE]
+        payload = {"flights": chunk}
+        logger.info(f"Reporting chunk of {len(chunk)} flights to the backend...")
 
-            success = False
-            last_exception = None
-            for attempt in range(REQUEST_RETRIES):
-                try:
-                    response = self.session.post(
-                        f"{self.base_url}/flights/report-scraped-data",
-                        json=payload,
-                        timeout=REQUEST_TIMEOUT
-                    )
-                    response.raise_for_status()
-                    logger.info(f"Chunk {i//POST_CHUNK_SIZE + 1} reported successfully.")
-                    success = True
-                    break
-                except requests.exceptions.RequestException as e:
-                    last_exception = e
-                    logger.warning(f"Attempt {attempt + 1}/{REQUEST_RETRIES} failed to report chunk: {e}")
-                    if attempt < REQUEST_RETRIES - 1:
-                        time.sleep(2)
+        last_exception = None
+        for attempt in range(REQUEST_RETRIES):
+            try:
+                response = self.session.post(
+                    f"{self.base_url}/flights/report-scraped-data",
+                    json=payload,
+                    timeout=REQUEST_TIMEOUT
+                )
+                response.raise_for_status()
+                logger.info(f"Chunk {i//POST_CHUNK_SIZE + 1} reported successfully.")
+                last_exception = None
+                break
+            except requests.exceptions.RequestException as e:
+                last_exception = e
+                logger.warning(f"Attempt {attempt + 1}/{REQUEST_RETRIES} failed to report chunk: {e}")
+                if attempt < REQUEST_RETRIES - 1:
+                    time.sleep(2)
 
-            if not success:
-                all_chunks_successful = False
-                logger.error(f"Failed to report chunk of {len(chunk)} flights after {REQUEST_RETRIES} attempts: {last_exception}")
-                if hasattr(last_exception, 'response') and last_exception.response is not None:
-                    logger.error(f"Backend responded with status {last_exception.response.status_code}: {last_exception.response.text}")
+        if last_exception:
+            logger.error(f"Failed to report chunk of {len(chunk)} flights after {REQUEST_RETRIES} attempts.")
+            raise last_exception
 
-            if i + POST_CHUNK_SIZE < len(scraped_flights):
-                 time.sleep(1)
+        if i + POST_CHUNK_SIZE < len(scraped_flights):
+             time.sleep(1)
 
-        return all_chunks_successful
+    return True
 
 
 class TunisairScraper:
