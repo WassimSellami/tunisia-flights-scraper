@@ -47,14 +47,8 @@ class BackendApiClient:
             logger.error(f"FATAL: Failed to fetch airports from backend: {e}")
             return []
 
-import time
-import requests
-import logging
-
-logger = logging.getLogger(__name__)
-
-def report_scraped_data(self, flight_chunk, max_retries=3, timeout=60):
-    url = f"{self.backend_url}/flights/report-scraped-data"
+def report_scraped_data(backend_url: str, flight_chunk, max_retries=3, timeout=60):
+    url = f"{backend_url}/flights/report-scraped-data"
     headers = {"Content-Type": "application/json"}
     data = {"flights": flight_chunk}
 
@@ -69,7 +63,6 @@ def report_scraped_data(self, flight_chunk, max_retries=3, timeout=60):
         except requests.exceptions.RequestException as e:
             logger.warning(f"⚠️ Attempt {attempt} failed with error: {e}")
 
-        # Backoff before retrying
         sleep_seconds = 2 ** attempt
         logger.info(f"Retrying in {sleep_seconds} seconds...")
         time.sleep(sleep_seconds)
@@ -78,18 +71,19 @@ def report_scraped_data(self, flight_chunk, max_retries=3, timeout=60):
     return False
 
 class TunisairScraper:
-    def __init__(self, api_client: BackendApiClient, exchange_rate_api_key: str):
+    def __init__(self, api_client: BackendApiClient, backend_url: str, exchange_rate_api_key: str):
         self.api_client = api_client
         self.session = requests.Session()
-        self.api_key_provided = exchange_rate_api_key and exchange_rate_api_key != "YOUR_API_KEY"
+        self.backend_url = backend_url
         self.exchange_rate_api_key = exchange_rate_api_key
+        self.api_key_provided = exchange_rate_api_key and exchange_rate_api_key != "YOUR_API_KEY"
         self.fallback_eur_rate = 0.29
 
     def _get_exchange_rate(self) -> float:
         if not self.api_key_provided:
             logger.warning(f"API Key not found. Using fallback exchange rate: 1 TND = {self.fallback_eur_rate:.4f} EUR")
             return self.fallback_eur_rate
-        
+
         url = EXCHANGE_RATE_API_URL.format(api_key=self.exchange_rate_api_key)
         try:
             response = self.session.get(url, timeout=10)
@@ -101,14 +95,14 @@ class TunisairScraper:
                 return rate
         except requests.RequestException as e:
             logger.error(f"Error fetching exchange rate: {e}. Using fallback.")
-        
+
         logger.warning(f"Using fallback exchange rate: 1 TND = {self.fallback_eur_rate:.4f} EUR")
         return self.fallback_eur_rate
 
     def _extract_prices(self, html: str, is_eur_native: bool, conversion_rate: float) -> List[Dict[str, Any]]:
         soup = BeautifulSoup(html, "html.parser")
         found_flights = []
-        
+
         for td in soup.find_all("td", class_="available"):
             date_str = td.get("data-departure")
             price_div = td.find("div", class_="val_price_offre")
@@ -118,7 +112,6 @@ class TunisairScraper:
 
             try:
                 departure_date = datetime.strptime(date_str, "%Y-%m-%d")
-                
                 if is_eur_native and "EUR" in price_text:
                     price_str = price_text.replace(" ", "").replace(",", ".").replace("EUR", "")
                     price_val = round(float(price_str), 2)
@@ -130,35 +123,73 @@ class TunisairScraper:
                     flight_data = {"price": price_val, "priceEur": price_eur}
                 else:
                     continue
-                
+
                 flight_data["departureDate"] = departure_date.isoformat()
                 found_flights.append(flight_data)
             except (ValueError, TypeError) as e:
                 logger.warning(f"Could not parse record with date '{date_str}' and price '{price_text}'. Error: {e}")
+
         return found_flights
+
+    def _scrape_route(self, dep_code: str, arr_code: str, is_eur_native: bool, conversion_rate: float = 1.0) -> List[Dict[str, Any]]:
+        logger.info(f"Scraping route: {dep_code} -> {arr_code}")
+
+        base_url = BASE_URL_DE if is_eur_native else BASE_URL_TN
+
+        today = date.today()
+        search_dates = [today.strftime("%Y-%m-%d")] + [
+            (today + relativedelta(months=i)).strftime("%Y-%m-01") for i in range(1, MONTHS_TO_SEARCH)
+        ]
+
+        route_flights = []
+        for search_date in search_dates:
+            params = {
+                "date": search_date,
+                "from": dep_code,
+                "to": arr_code,
+                "tripDuration": DEFAULT_TRIP_DURATION,
+                "tripType": DEFAULT_TRIP_TYPE
+            }
+            try:
+                response = self.session.get(base_url, params=params, timeout=20)
+                response.raise_for_status()
+                data = response.json()
+                html_view = data.get('view', '')
+                logger.info(f"HTML content length: {len(html_view)}")
+
+                if html_view:
+                    extracted_data = self._extract_prices(html_view, is_eur_native, conversion_rate)
+                    for flight_data in extracted_data:
+                        flight_data["departureAirportCode"] = dep_code
+                        flight_data["arrivalAirportCode"] = arr_code
+                        flight_data["airlineCode"] = AIRLINE_CODE
+                        route_flights.append(flight_data)
+
+                time.sleep(0.5)
+            except requests.RequestException as e:
+                logger.error(f"Request failed for {dep_code}->{arr_code} on date {search_date}: {e}")
+                continue
+
+        logger.info(f"Found {len(route_flights)} prices for route {dep_code} -> {arr_code}")
+        return route_flights
 
     def run(self):
         logger.info("Starting Tunisair scraper run...")
-        
-        routes_de_to_tn: List[Tuple[str, str]] = []
-        routes_tn_to_de: List[Tuple[str, str]] = []
 
         use_predefined = os.getenv('USE_PREDEFINED_ROUTES', 'true').lower() in ('true', '1', 'yes')
+        routes_de_to_tn = VALID_ROUTES_DE_TO_TN if use_predefined else []
+        routes_tn_to_de = VALID_ROUTES_TN_TO_DE if use_predefined else []
 
-        if use_predefined:
-            logger.info("Using predefined routes for scraping.")
-            routes_de_to_tn = VALID_ROUTES_DE_TO_TN
-            routes_tn_to_de = VALID_ROUTES_TN_TO_DE
-        else:
+        if not use_predefined:
             logger.info("Dynamically generating all possible routes from backend airports.")
             airports = self.api_client.get_airports()
             if not airports:
                 logger.error("Scraper run aborted: Could not fetch airport list from backend.")
                 return
-            
+
             tunisian_airports = [a['code'] for a in airports if a.get("country") == "TN"]
             german_airports = [a['code'] for a in airports if a.get("country") == "DE"]
-            
+
             if not tunisian_airports or not german_airports:
                 logger.error("Could not find airports for both Germany and Tunisia to generate dynamic routes.")
                 return
@@ -180,55 +211,12 @@ class TunisairScraper:
         if all_scraped_flights:
             chunk_size = 100
             for i in range(0, len(all_scraped_flights), chunk_size):
-                chunk = all_scraped_flights[i:i+chunk_size]
-                success = self.report_scraped_data(chunk)
+                chunk = all_scraped_flights[i:i + chunk_size]
+                success = report_scraped_data(self.backend_url, chunk)
                 if not success:
                     logger.error(f"❌ Failed to report chunk {i // chunk_size + 1}")
                 time.sleep(1)
         else:
             logger.info("No Tunisair flights found in this scraping run.")
-            
+
         logger.info("Tunisair scraper run finished.")
-
-    def _scrape_route(self, dep_code: str, arr_code: str, is_eur_native: bool, conversion_rate: float = 1.0) -> List[Dict[str, Any]]:
-        logger.info(f"Scraping route: {dep_code} -> {arr_code}")
-        
-        base_url = BASE_URL_DE if is_eur_native else BASE_URL_TN
-        
-        today = date.today()
-        search_dates = [today.strftime("%Y-%m-%d")]
-        for i in range(1, MONTHS_TO_SEARCH):
-            search_dates.append((today + relativedelta(months=i)).strftime("%Y-%m-01"))
-
-        route_flights = []
-        for search_date in search_dates:
-            params = {
-                "date": search_date,
-                "from": dep_code,
-                "to": arr_code,
-                "tripDuration": DEFAULT_TRIP_DURATION,
-                "tripType": DEFAULT_TRIP_TYPE
-            }
-            try:
-                response = self.session.get(base_url, params=params, timeout=20)
-                response.raise_for_status()
-                data = response.json()
-                html_view = data.get('view', '')
-                logger.info(f"HTML content length: {len(html_view)}")
-
-                
-                if html_view:
-                    extracted_data = self._extract_prices(html_view, is_eur_native, conversion_rate)
-                    for flight_data in extracted_data:
-                        flight_data["departureAirportCode"] = dep_code
-                        flight_data["arrivalAirportCode"] = arr_code
-                        flight_data["airlineCode"] = AIRLINE_CODE
-                        route_flights.append(flight_data)
-                
-                time.sleep(0.5)
-            except requests.RequestException as e:
-                logger.error(f"Request failed for {dep_code}->{arr_code} on date {search_date}: {e}")
-                continue
-        
-        logger.info(f"Found {len(route_flights)} prices for route {dep_code} -> {arr_code}")
-        return route_flights
