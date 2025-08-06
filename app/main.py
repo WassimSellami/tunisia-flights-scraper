@@ -1,3 +1,4 @@
+# app/main.py
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 import os
@@ -5,7 +6,8 @@ import logging
 from dotenv import load_dotenv
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from app.services.nouvelair_scraper_service import BackendApiClient, NouvelairScraper
+from app.services.shared_services import BackendApiClient
+from app.services.nouvelair_scraper_service import NouvelairScraper
 from app.services.tunisair_scraper_service import TunisairScraper
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -20,7 +22,7 @@ async def lifespan(app: FastAPI):
     exchange_api_key = os.getenv("EXCHANGE_RATE_API_KEY", "")
 
     if not backend_url:
-        logger.fatal("FATAL: MAIN_BACKEND_URL environment variable is not set. Scraper cannot run.")
+        logger.critical("FATAL: MAIN_BACKEND_URL environment variable is not set. Scrapers cannot run.")
         yield
         return
 
@@ -30,21 +32,27 @@ async def lifespan(app: FastAPI):
 
     def run_nouvelair_job():
         logger.info("--- Triggering Nouvelair scraper cron job ---")
-        nouvelair_scraper.run()
-        logger.info("--- Nouvelair scraper cron job finished ---")
+        try:
+            nouvelair_scraper.run()
+            logger.info("--- Nouvelair scraper cron job finished ---")
+        except Exception as e:
+            logger.error(f"--- Nouvelair scraper cron job FAILED. Error: {e} ---")
 
     def run_tunisair_job():
         logger.info("--- Triggering Tunisair scraper cron job ---")
-        tunisair_scraper.run()
-        logger.info("--- Tunisair scraper cron job finished ---")
-        
+        try:
+            tunisair_scraper.run()
+            logger.info("--- Tunisair scraper cron job finished ---")
+        except Exception as e:
+            logger.error(f"--- Tunisair scraper cron job FAILED. Error: {e} ---")
+
     scheduler = BackgroundScheduler(timezone="UTC")
     
-    scheduler.add_job(run_nouvelair_job, 'cron', minute=16)
+    scheduler.add_job(run_nouvelair_job, 'cron', minute=16, misfire_grace_time=600)
     logger.info("Scheduled Nouvelair scraper to run every hour at minute 16.")
     
-    scheduler.add_job(run_tunisair_job, 'cron', minute='10,25,40,55')
-    logger.info("Scheduled Tunisair scraper to run every 15 minutes, starting at minute 10.")
+    scheduler.add_job(run_tunisair_job, 'cron', minute='10,25,40,55', misfire_grace_time=600)
+    logger.info("Scheduled Tunisair scraper to run every 15 minutes, at minutes 10, 25, 40, and 55.")
     
     scheduler.start()
     
