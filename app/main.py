@@ -48,11 +48,11 @@ async def lifespan(app: FastAPI):
 
     scheduler = BackgroundScheduler(timezone="UTC")
     
-    scheduler.add_job(run_nouvelair_job, 'cron', minute=37)
+    scheduler.add_job(run_nouvelair_job, 'cron', minute=16)
     logger.info("Scheduled Nouvelair scraper to run every hour at minute 16.")
     
-    # scheduler.add_job(run_tunisair_job, 'cron', minute='10,25,40,55', misfire_grace_time=600)
-    # logger.info("Scheduled Tunisair scraper to run every 15 minutes, at minutes 10, 25, 40, and 55.")
+    scheduler.add_job(run_tunisair_job, 'cron', minute='10,25,40,55', misfire_grace_time=600)
+    logger.info("Scheduled Tunisair scraper to run every 15 minutes, at minutes 10, 25, 40, and 55.")
     
     scheduler.start()
     
