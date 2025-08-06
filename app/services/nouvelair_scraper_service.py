@@ -137,7 +137,6 @@ class NouvelairScraper:
 
         all_scraped_flights: List[Dict[str, Any]] = []
         for dep_code, arr_code in routes:
-            logger.info(f"Scraping route: {dep_code} -> {arr_code}")
             flights_on_route = self._get_nouvelair_flight_availability(dep_code, arr_code)
             time.sleep(1)
 
