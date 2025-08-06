@@ -65,19 +65,23 @@ class NouvelairScraper:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             page = browser.new_page()
-            key_found = False
+            
+            key_holder = []
 
             def handle_request(request):
-                nonlocal captured_key, key_found
-                if not captured_key and "webapi.nouvelair.com/api" in request.url and "x-api-key" in request.headers:
-                    captured_key = request.headers["x-api-key"]
-                    logger.info(f"API Key captured: {captured_key[:5]}...")
-                    key_found = True
+                nonlocal captured_key
+                if "webapi.nouvelair.com/api" in request.url and "x-api-key" in request.headers:
+                    if not key_holder:
+                        captured_key = request.headers["x-api-key"]
+                        key_holder.append(captured_key)
+                        logger.info(f"API Key captured: {captured_key[:5]}...")
             
             page.on("request", handle_request)
             try:
                 page.goto(NOUVELAIR_URL, wait_until="domcontentloaded", timeout=45000)
-                page.wait_for_condition(lambda: key_found, timeout=30000)
+                
+                page.wait_for_function(lambda: len(key_holder) > 0, timeout=30000)
+
             except Exception as e:
                 logger.error(f"Error during Playwright API key capture: {e}")
             finally:
