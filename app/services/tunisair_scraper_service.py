@@ -9,6 +9,7 @@ from dateutil.relativedelta import relativedelta
 from itertools import product
 from typing import List, Dict, Any, Tuple
 
+# --- Configuration Constants ---
 BASE_URL_DE = "https://flights.tunisair.com/en-de/prices/per-day"
 BASE_URL_TN = "https://flights.tunisair.com/en-tn/prices/per-day"
 EXCHANGE_RATE_API_URL = "https://v6.exchangerate-api.com/v6/{api_key}/latest/TND"
@@ -17,10 +18,11 @@ AIRLINE_CODE = "TU"
 MONTHS_TO_SEARCH = 4
 DEFAULT_TRIP_TYPE = "O"
 DEFAULT_TRIP_DURATION = "0"
-POST_CHUNK_SIZE = 100
-REQUEST_RETRIES = 3
-REQUEST_TIMEOUT = 60
+POST_CHUNK_SIZE = 100  # Send data in batches of 100 flights
+REQUEST_RETRIES = 3    # Retry failed network requests up to 3 times
+REQUEST_TIMEOUT = 60   # Set a timeout for requests
 
+# --- Predefined Routes ---
 VALID_ROUTES_DE_TO_TN: List[Tuple[str, str]] = [
     ('MUC', 'TUN'), ('MUC', 'MIR'), ('MUC', 'DJE'),
     ('FRA', 'TUN'), ('FRA', 'DJE'),
@@ -32,15 +34,19 @@ VALID_ROUTES_TN_TO_DE: List[Tuple[str, str]] = [
     ('DJE', 'MUC'), ('DJE', 'FRA'),
 ]
 
+# --- Logger Setup ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+
 class BackendApiClient:
+    """Handles all communication with your backend API."""
     def __init__(self, base_url: str):
         self.base_url = base_url
         self.session = requests.Session()
 
     def get_airports(self) -> List[Dict[str, Any]]:
+        """Fetches the list of airports from the backend."""
         try:
             response = self.session.get(f"{self.base_url}/airports/")
             response.raise_for_status()
@@ -51,7 +57,11 @@ class BackendApiClient:
             return []
 
     def report_scraped_data(self, scraped_flights: List[Dict[str, Any]]) -> bool:
+        """
+        Reports scraped data to the backend in chunks with a retry mechanism.
+        """
         all_chunks_successful = True
+        # Outer loop to break the data into smaller chunks
         for i in range(0, len(scraped_flights), POST_CHUNK_SIZE):
             chunk = scraped_flights[i:i + POST_CHUNK_SIZE]
             payload = {"flights": chunk}
@@ -59,6 +69,7 @@ class BackendApiClient:
 
             success = False
             last_exception = None
+            # Inner loop to retry sending each chunk if it fails
             for attempt in range(REQUEST_RETRIES):
                 try:
                     response = self.session.post(
@@ -67,14 +78,14 @@ class BackendApiClient:
                         timeout=REQUEST_TIMEOUT
                     )
                     response.raise_for_status()
-                    logger.info(f"Chunk {i//POST_CHUNK_SIZE + 1} reported successfully. Backend accepted the report.")
+                    logger.info(f"Chunk {i//POST_CHUNK_SIZE + 1} reported successfully.")
                     success = True
-                    break
+                    break  # Exit the retry loop on success
                 except requests.exceptions.RequestException as e:
                     last_exception = e
                     logger.warning(f"Attempt {attempt + 1}/{REQUEST_RETRIES} failed to report chunk: {e}")
                     if attempt < REQUEST_RETRIES - 1:
-                        time.sleep(2)
+                        time.sleep(2)  # Wait before the next attempt
 
             if not success:
                 all_chunks_successful = False
@@ -82,12 +93,15 @@ class BackendApiClient:
                 if hasattr(last_exception, 'response') and last_exception.response is not None:
                     logger.error(f"Backend responded with status {last_exception.response.status_code}: {last_exception.response.text}")
 
+            # Pause briefly between sending chunks to be considerate to the server
             if i + POST_CHUNK_SIZE < len(scraped_flights):
                  time.sleep(1)
 
         return all_chunks_successful
 
+
 class TunisairScraper:
+    """Scrapes flight data from the Tunisair website."""
     def __init__(self, api_client: BackendApiClient, exchange_rate_api_key: str):
         self.api_client = api_client
         self.session = requests.Session()
@@ -96,6 +110,7 @@ class TunisairScraper:
         self.fallback_eur_rate = 0.29
 
     def _get_exchange_rate(self) -> float:
+        """Fetches the TND to EUR exchange rate with a retry mechanism."""
         if not self.api_key_provided:
             logger.warning(f"API Key not found. Using fallback exchange rate: 1 TND = {self.fallback_eur_rate:.4f} EUR")
             return self.fallback_eur_rate
@@ -119,6 +134,7 @@ class TunisairScraper:
         return self.fallback_eur_rate
 
     def _extract_prices(self, html: str, is_eur_native: bool, conversion_rate: float) -> List[Dict[str, Any]]:
+        """Extracts flight price information from the provided HTML content."""
         soup = BeautifulSoup(html, "html.parser")
         found_flights = []
 
@@ -151,6 +167,7 @@ class TunisairScraper:
         return found_flights
 
     def run(self):
+        """Executes the full scraping and reporting process."""
         logger.info("Starting Tunisair scraper run...")
 
         routes_de_to_tn: List[Tuple[str, str]] = []
@@ -198,6 +215,7 @@ class TunisairScraper:
         logger.info("Tunisair scraper run finished.")
 
     def _scrape_route(self, dep_code: str, arr_code: str, is_eur_native: bool, conversion_rate: float = 1.0) -> List[Dict[str, Any]]:
+        """Scrapes all available future prices for a single route with a retry mechanism."""
         logger.info(f"Scraping route: {dep_code} -> {arr_code}")
 
         base_url = BASE_URL_DE if is_eur_native else BASE_URL_TN
@@ -216,7 +234,7 @@ class TunisairScraper:
                 "tripDuration": DEFAULT_TRIP_DURATION,
                 "tripType": DEFAULT_TRIP_TYPE
             }
-            
+
             html_view = None
             for attempt in range(REQUEST_RETRIES):
                 try:
@@ -225,12 +243,12 @@ class TunisairScraper:
                     data = response.json()
                     html_view = data.get('view', '')
                     logger.info(f"Successfully fetched HTML for {dep_code}->{arr_code} on {search_date}. Length: {len(html_view)}")
-                    break 
+                    break
                 except requests.RequestException as e:
                     logger.warning(f"Attempt {attempt + 1}/{REQUEST_RETRIES} failed for {dep_code}->{arr_code} on date {search_date}: {e}")
                     if attempt < REQUEST_RETRIES - 1:
                         time.sleep(1)
-            
+
             if html_view:
                 extracted_data = self._extract_prices(html_view, is_eur_native, conversion_rate)
                 for flight_data in extracted_data:
@@ -241,17 +259,18 @@ class TunisairScraper:
             else:
                 logger.error(f"Failed to fetch data for {dep_code}->{arr_code} on date {search_date} after {REQUEST_RETRIES} attempts.")
 
-            time.sleep(0.5)
+            time.sleep(0.5) # Pause between monthly requests for the same route
 
         logger.info(f"Found {len(route_flights)} prices for route {dep_code} -> {arr_code}")
         return route_flights
+
 
 if __name__ == '__main__':
     BACKEND_URL = os.getenv("BACKEND_URL")
     EXCHANGE_RATE_API_KEY = os.getenv("EXCHANGE_RATE_API_KEY", "YOUR_API_KEY")
 
     if not BACKEND_URL:
-        logger.critical("FATAL: Backend URL not found in environment variables. Please set BACKEND_URL.")
+        logger.critical("FATAL: Backend URL not found. Please set BACKEND_URL.")
     else:
         logger.info(f"Backend URL set to: {BACKEND_URL}")
         api_client = BackendApiClient(base_url=BACKEND_URL)
