@@ -1,7 +1,6 @@
 import time
 import logging
 import requests
-import json
 import os
 from datetime import datetime, date
 from bs4 import BeautifulSoup
@@ -9,7 +8,6 @@ from dateutil.relativedelta import relativedelta
 from itertools import product
 from typing import List, Dict, Any, Tuple
 
-# --- Configuration Constants ---
 BASE_URL_DE = "https://flights.tunisair.com/en-de/prices/per-day"
 BASE_URL_TN = "https://flights.tunisair.com/en-tn/prices/per-day"
 EXCHANGE_RATE_API_URL = "https://v6.exchangerate-api.com/v6/{api_key}/latest/TND"
@@ -18,11 +16,10 @@ AIRLINE_CODE = "TU"
 MONTHS_TO_SEARCH = 4
 DEFAULT_TRIP_TYPE = "O"
 DEFAULT_TRIP_DURATION = "0"
-POST_CHUNK_SIZE = 100  # Send data in batches of 100 flights
-REQUEST_RETRIES = 3    # Retry failed network requests up to 3 times
-REQUEST_TIMEOUT = 60   # Set a timeout for requests
+POST_CHUNK_SIZE = 100
+REQUEST_RETRIES = 3
+REQUEST_TIMEOUT = 60 
 
-# --- Predefined Routes ---
 VALID_ROUTES_DE_TO_TN: List[Tuple[str, str]] = [
     ('MUC', 'TUN'), ('MUC', 'MIR'), ('MUC', 'DJE'),
     ('FRA', 'TUN'), ('FRA', 'DJE'),
@@ -34,7 +31,6 @@ VALID_ROUTES_TN_TO_DE: List[Tuple[str, str]] = [
     ('DJE', 'MUC'), ('DJE', 'FRA'),
 ]
 
-# --- Logger Setup ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -57,11 +53,7 @@ class BackendApiClient:
             return []
 
     def report_scraped_data(self, scraped_flights: List[Dict[str, Any]]) -> bool:
-        """
-        Reports scraped data to the backend in chunks with a retry mechanism.
-        """
         all_chunks_successful = True
-        # Outer loop to break the data into smaller chunks
         for i in range(0, len(scraped_flights), POST_CHUNK_SIZE):
             chunk = scraped_flights[i:i + POST_CHUNK_SIZE]
             payload = {"flights": chunk}
@@ -69,7 +61,6 @@ class BackendApiClient:
 
             success = False
             last_exception = None
-            # Inner loop to retry sending each chunk if it fails
             for attempt in range(REQUEST_RETRIES):
                 try:
                     response = self.session.post(
@@ -80,12 +71,12 @@ class BackendApiClient:
                     response.raise_for_status()
                     logger.info(f"Chunk {i//POST_CHUNK_SIZE + 1} reported successfully.")
                     success = True
-                    break  # Exit the retry loop on success
+                    break
                 except requests.exceptions.RequestException as e:
                     last_exception = e
                     logger.warning(f"Attempt {attempt + 1}/{REQUEST_RETRIES} failed to report chunk: {e}")
                     if attempt < REQUEST_RETRIES - 1:
-                        time.sleep(2)  # Wait before the next attempt
+                        time.sleep(2)
 
             if not success:
                 all_chunks_successful = False
@@ -93,7 +84,6 @@ class BackendApiClient:
                 if hasattr(last_exception, 'response') and last_exception.response is not None:
                     logger.error(f"Backend responded with status {last_exception.response.status_code}: {last_exception.response.text}")
 
-            # Pause briefly between sending chunks to be considerate to the server
             if i + POST_CHUNK_SIZE < len(scraped_flights):
                  time.sleep(1)
 
@@ -215,7 +205,6 @@ class TunisairScraper:
         logger.info("Tunisair scraper run finished.")
 
     def _scrape_route(self, dep_code: str, arr_code: str, is_eur_native: bool, conversion_rate: float = 1.0) -> List[Dict[str, Any]]:
-        """Scrapes all available future prices for a single route with a retry mechanism."""
         logger.info(f"Scraping route: {dep_code} -> {arr_code}")
 
         base_url = BASE_URL_DE if is_eur_native else BASE_URL_TN
@@ -242,7 +231,6 @@ class TunisairScraper:
                     response.raise_for_status()
                     data = response.json()
                     html_view = data.get('view', '')
-                    logger.info(f"Successfully fetched HTML for {dep_code}->{arr_code} on {search_date}. Length: {len(html_view)}")
                     break
                 except requests.RequestException as e:
                     logger.warning(f"Attempt {attempt + 1}/{REQUEST_RETRIES} failed for {dep_code}->{arr_code} on date {search_date}: {e}")
@@ -259,9 +247,7 @@ class TunisairScraper:
             else:
                 logger.error(f"Failed to fetch data for {dep_code}->{arr_code} on date {search_date} after {REQUEST_RETRIES} attempts.")
 
-            time.sleep(0.5) # Pause between monthly requests for the same route
-
-        logger.info(f"Found {len(route_flights)} prices for route {dep_code} -> {arr_code}")
+            time.sleep(0.5)
         return route_flights
 
 
