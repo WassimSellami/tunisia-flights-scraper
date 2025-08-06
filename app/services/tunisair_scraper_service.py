@@ -179,8 +179,8 @@ class TunisairScraper:
 
         if all_scraped_flights:
             chunk_size = 100
-            for i in range(0, len(report_scraped_data), chunk_size):
-                chunk = report_scraped_data[i:i+chunk_size]
+            for i in range(0, len(all_scraped_flights), chunk_size):
+                chunk = all_scraped_flights[i:i+chunk_size]
                 success = self.report_scraped_data(chunk)
                 if not success:
                     logger.error(f"❌ Failed to report chunk {i // chunk_size + 1}")
