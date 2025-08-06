@@ -53,7 +53,6 @@ class BackendApiClient:
             return []
 
 def report_scraped_data(self, scraped_flights: List[Dict[str, Any]]) -> bool:
-    all_chunks_successful = True
     for i in range(0, len(scraped_flights), POST_CHUNK_SIZE):
         chunk = scraped_flights[i:i + POST_CHUNK_SIZE]
         payload = {"flights": chunk}
@@ -202,8 +201,6 @@ class TunisairScraper:
         logger.info("Tunisair scraper run finished.")
 
     def _scrape_route(self, dep_code: str, arr_code: str, is_eur_native: bool, conversion_rate: float = 1.0) -> List[Dict[str, Any]]:
-        logger.info(f"Scraping route: {dep_code} -> {arr_code}")
-
         base_url = BASE_URL_DE if is_eur_native else BASE_URL_TN
 
         today = date.today()
