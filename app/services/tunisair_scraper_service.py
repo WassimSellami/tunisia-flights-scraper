@@ -196,6 +196,8 @@ class TunisairScraper:
                 response.raise_for_status()
                 data = response.json()
                 html_view = data.get('view', '')
+                logger.info(f"HTML content length: {len(html_view)}")
+
                 
                 if html_view:
                     extracted_data = self._extract_prices(html_view, is_eur_native, conversion_rate)
