@@ -1,4 +1,3 @@
-# app/main.py
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 import os

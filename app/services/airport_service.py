@@ -1,39 +1,44 @@
-import httpx
-import os
 import logging
-from pydantic import BaseModel
-from typing import List
+import time
+from typing import List, Dict, Any
+import requests
 
 logger = logging.getLogger(__name__)
 
 
-class Airport(BaseModel):
-    code: str
-    name: str
-    country: str
-
-
-class AirportService:
-    def __init__(self):
-        self.base_url = os.getenv("MAIN_BACKEND_URL", "http://localhost:8000")
-        if not self.base_url:
-            logger.critical("Backend URL is not set. AirportService cannot function.")
+class BackendApiClient:
+    def __init__(self, base_url: str):
+        if not base_url:
             raise ValueError("Backend URL cannot be empty")
+        self.base_url = base_url
 
-    async def get_all_airports(self) -> List[Airport]:
-        async with httpx.AsyncClient() as client:
+    def get_airports(self, retries: int = 3, delay: int = 5) -> List[Dict[str, Any]]:
+        url = f"{self.base_url}/airports/"
+        for attempt in range(retries):
             try:
-                response = await client.get(f"{self.base_url}/airports/")
+                response = requests.get(url, timeout=15)
                 response.raise_for_status()
-
-                airports_data = response.json()
-                return [Airport(**airport_data) for airport_data in airports_data]
-
-            except httpx.RequestError as exc:
-                logger.error(f"An HTTP error occurred while requesting airports: {exc}")
-                return []
-            except Exception as exc:
-                logger.error(
-                    f"An unexpected error occurred while fetching airports: {exc}"
+                return response.json()
+            except requests.RequestException as e:
+                logger.warning(
+                    f"Attempt {attempt + 1} of {retries} to fetch airports failed: {e}"
                 )
-                return []
+                if attempt < retries - 1:
+                    time.sleep(delay)
+                else:
+                    logger.error(
+                        f"FATAL: All {retries} attempts to fetch airports failed. The original error was: {e}"
+                    )
+        return []
+
+    def report_scraped_data(self, data: List[Dict[str, Any]]):
+        url = f"{self.base_url}/flights/report"
+        try:
+            response = requests.post(url, json=data, timeout=30)
+            response.raise_for_status()
+            logger.info(
+                f"Successfully reported {len(data)} flight records to the backend."
+            )
+        except requests.RequestException as e:
+            logger.error(f"Failed to report scraped data to backend: {e}")
+            raise
