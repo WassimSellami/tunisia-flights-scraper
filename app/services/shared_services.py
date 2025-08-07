@@ -9,6 +9,7 @@ POST_CHUNK_SIZE = 150
 REQUEST_RETRIES = 3
 REQUEST_TIMEOUT = 60
 
+
 class BackendApiClient:
     def __init__(self, base_url: str):
         if not base_url:
@@ -31,9 +32,11 @@ class BackendApiClient:
             logger.info("No scraped flights to report.")
             return
 
-        logger.info(f"Preparing to report {len(scraped_flights)} total flights in chunks...")
+        logger.info(
+            f"Preparing to report {len(scraped_flights)} total flights in chunks..."
+        )
         for i in range(0, len(scraped_flights), POST_CHUNK_SIZE):
-            chunk = scraped_flights[i:i + POST_CHUNK_SIZE]
+            chunk = scraped_flights[i : i + POST_CHUNK_SIZE]
             payload = {"flights": chunk}
             chunk_number = i // POST_CHUNK_SIZE + 1
             logger.info(f"Reporting chunk {chunk_number} with {len(chunk)} flights...")
@@ -44,10 +47,11 @@ class BackendApiClient:
                     response = self.session.post(
                         f"{self.base_url}/flights/report-scraped-data",
                         json=payload,
-                        timeout=REQUEST_TIMEOUT
+                        timeout=REQUEST_TIMEOUT,
                     )
                     response.raise_for_status()
                     last_exception = None
+                    logger.info(f"Chunk {chunk_number} reported successfully.")
                     break
                 except requests.RequestException as e:
                     last_exception = e

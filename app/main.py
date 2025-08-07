@@ -10,8 +10,11 @@ from app.services.shared_services import BackendApiClient
 from app.services.nouvelair_scraper_service import NouvelairScraper
 from app.services.tunisair_scraper_service import TunisairScraper
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -22,13 +25,17 @@ async def lifespan(app: FastAPI):
     exchange_api_key = os.getenv("EXCHANGE_RATE_API_KEY", "")
 
     if not backend_url:
-        logger.critical("FATAL: MAIN_BACKEND_URL environment variable is not set. Scrapers cannot run.")
+        logger.critical(
+            "FATAL: MAIN_BACKEND_URL environment variable is not set. Scrapers cannot run."
+        )
         yield
         return
 
     api_client = BackendApiClient(base_url=backend_url)
     nouvelair_scraper = NouvelairScraper(api_client=api_client)
-    tunisair_scraper = TunisairScraper(api_client=api_client, exchange_rate_api_key=exchange_api_key)
+    tunisair_scraper = TunisairScraper(
+        api_client=api_client, exchange_rate_api_key=exchange_api_key
+    )
 
     def run_nouvelair_job():
         logger.info("--- Triggering Nouvelair scraper cron job ---")
@@ -47,22 +54,24 @@ async def lifespan(app: FastAPI):
             logger.error(f"--- Tunisair scraper cron job FAILED. Error: {e} ---")
 
     scheduler = BackgroundScheduler(timezone="UTC")
-    
-    scheduler.add_job(run_nouvelair_job, 'cron', minute=16)
-    logger.info("Scheduled Nouvelair scraper to run every hour at minute 16.")
-    
-    scheduler.add_job(run_tunisair_job, 'cron', minute='10,25,40,55', misfire_grace_time=600)
-    logger.info("Scheduled Tunisair scraper to run every 15 minutes, at minutes 10, 25, 40, and 55.")
-    
+
+    # scheduler.add_job(run_nouvelair_job, 'cron', minute=16)
+    # logger.info("Scheduled Nouvelair scraper to run every hour at minute 16.")
+
+    scheduler.add_job(run_tunisair_job, "cron", minutes="2", misfire_grace_time=600)
+    logger.info("Scheduled Tunisair scraper to run every 2 minutes.")
+
     scheduler.start()
-    
+
     yield
-    
+
     logger.info("Shutting down scheduler...")
     scheduler.shutdown()
     logger.info("Scraper service has shut down.")
 
+
 app = FastAPI(lifespan=lifespan)
+
 
 @app.get("/ping")
 async def ping():
