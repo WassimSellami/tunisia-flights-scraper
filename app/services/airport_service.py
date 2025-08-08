@@ -5,40 +5,41 @@ import requests
 
 logger = logging.getLogger(__name__)
 
+REQUEST_RETRIES = 3
+REQUEST_TIMEOUT = 15
+
 
 class BackendApiClient:
     def __init__(self, base_url: str):
         if not base_url:
             raise ValueError("Backend URL cannot be empty")
         self.base_url = base_url
+        self.session = requests.Session()
 
-    def get_airports(self, retries: int = 3, delay: int = 5) -> List[Dict[str, Any]]:
+    def get_airports(self) -> List[Dict[str, Any]]:
+        """Fetch airport list from backend with retries similar to shared_services retry logic."""
         url = f"{self.base_url}/airports/"
-        for attempt in range(retries):
+        last_exception = None
+
+        for attempt in range(REQUEST_RETRIES):
             try:
-                response = requests.get(url, timeout=15)
+                logger.info(f"Fetching airports (attempt {attempt + 1}/{REQUEST_RETRIES})...")
+                response = self.session.get(url, timeout=REQUEST_TIMEOUT)
                 response.raise_for_status()
+                logger.info("Successfully fetched airports.")
                 return response.json()
             except requests.RequestException as e:
+                last_exception = e
                 logger.warning(
-                    f"Attempt {attempt + 1} of {retries} to fetch airports failed: {e}"
+                    f"Attempt {attempt + 1}/{REQUEST_RETRIES} to fetch airports failed: {e}"
                 )
-                if attempt < retries - 1:
-                    time.sleep(delay)
-                else:
-                    logger.error(
-                        f"FATAL: All {retries} attempts to fetch airports failed. The original error was: {e}"
-                    )
-        return []
+                if attempt < REQUEST_RETRIES - 1:
+                    # exponential-ish backoff like shared_services
+                    time.sleep(2 * (attempt + 1))
 
-    def report_scraped_data(self, data: List[Dict[str, Any]]):
-        url = f"{self.base_url}/flights/report"
-        try:
-            response = requests.post(url, json=data, timeout=30)
-            response.raise_for_status()
-            logger.info(
-                f"Successfully reported {len(data)} flight records to the backend."
-            )
-        except requests.RequestException as e:
-            logger.error(f"Failed to report scraped data to backend: {e}")
-            raise
+        # If we exhausted all attempts
+        logger.error(
+            f"FATAL: Failed to fetch airports after {REQUEST_RETRIES} attempts. "
+            f"Last error was: {last_exception}"
+        )
+        return []
