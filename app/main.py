@@ -5,7 +5,7 @@ import logging
 from dotenv import load_dotenv
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from app.services.shared_services import BackendApiClient
+from app.services.backend_api_client import BackendApiClient
 from app.services.nouvelair_scraper_service import NouvelairScraper
 from app.services.tunisair_scraper_service import TunisairScraper
 

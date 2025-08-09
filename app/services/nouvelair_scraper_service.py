@@ -5,7 +5,7 @@ from itertools import product
 from typing import List, Dict, Any
 import requests
 from playwright.sync_api import sync_playwright
-from .shared_services import BackendApiClient
+from .backend_api_client import BackendApiClient
 
 NOUVELAIR_AVAILABILITY_API = "https://webapi.nouvelair.com/api/reservation/availability"
 NOUVELAIR_URL = "https://www.nouvelair.com/"
