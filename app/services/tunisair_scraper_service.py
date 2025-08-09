@@ -41,7 +41,6 @@ logger = logging.getLogger(__name__)
 class TunisairScraper:
     def __init__(self, api_client: BackendApiClient, exchange_rate_api_key: str):
         self.api_client = api_client
-        self.session = requests.Session()
         self.api_key_provided = (
             exchange_rate_api_key and exchange_rate_api_key != "YOUR_API_KEY"
         )
@@ -176,6 +175,7 @@ class TunisairScraper:
 
     def run(self):
         logger.info("--- Starting Tunisair scraper run ---")
+        self.session = requests.Session()
         use_predefined = os.getenv("USE_PREDEFINED_ROUTES", "true").lower() in (
             "true",
             "1",
