@@ -10,6 +10,7 @@ from dateutil.relativedelta import relativedelta
 from .backend_api_client import BackendApiClient
 
 BASE_URL_DE = "https://flights.tunisair.com/en-de/prices/per-day"
+BASE_URL_BE = "https://flights.tunisair.com/en-be/prices/per-day"
 BASE_URL_TN = "https://flights.tunisair.com/en-tn/prices/per-day"
 EXCHANGE_RATE_API_URL = "https://v6.exchangerate-api.com/v6/{api_key}/latest/TND"
 AIRLINE_CODE = "TU"
@@ -25,8 +26,10 @@ VALID_ROUTES_DE_TO_TN: List[Tuple[str, str]] = [
     ("FRA", "TUN"),
     ("FRA", "DJE"),
     ("DUS", "TUN"),
+    ("BRU", "TUN"),
 ]
 VALID_ROUTES_TN_TO_DE: List[Tuple[str, str]] = [
+    ("TUN", "BRU"),
     ("TUN", "MUC"),
     ("TUN", "FRA"),
     ("TUN", "DUS"),
@@ -126,7 +129,9 @@ class TunisairScraper:
         is_eur_native: bool,
         conversion_rate: float = 1.0,
     ) -> List[Dict[str, Any]]:
-        base_url = BASE_URL_DE if is_eur_native else BASE_URL_TN
+        base_url = BASE_URL_TN
+        if is_eur_native:
+            base_url = BASE_URL_BE if dep_code == "BRU" else BASE_URL_DE
         route_flights = []
         today = date.today()
         search_dates = [today.strftime("%Y-%m-%d")] + [
